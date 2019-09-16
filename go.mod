@@ -1,4 +1,4 @@
-module git.subiz.net/pubsub-client
+module github.com/subiz/pubsub-client
 
 go 1.13
 
