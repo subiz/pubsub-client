@@ -4,37 +4,65 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"hash/crc32"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/subiz/header"
-	cpb "github.com/subiz/header/common"
 	pb "github.com/subiz/header/pubsub"
-	"github.com/subiz/kafka"
 	"github.com/willf/bloom"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer/roundrobin"
-	"time"
 )
 
 type Pubsub struct {
-	client header.PubsubClient
-	es     *kafka.Publisher
+	sync.Mutex
+
+	clients  []header.PubsubClient
+	service  string
+	maxNodes int
 }
 
-func (p *Pubsub) PublishAsync(topics, userids, neguserids []string, payload []byte) {
-	key := topics[0]
-	mes := p.createPublishMesasge(topics, userids, neguserids, payload)
-	p.es.PublishAsync(header.E_PubsubRequested.String(), mes, -1, key)
-}
-
-func (p *Pubsub) Publish(topics, userids, neguserids []string, payload []byte) {
-	if len(topics) == 0 {
-		return
+func NewPubsubClient(service string, maxNodes int) *Pubsub {
+	return &Pubsub{
+		service:  service,
+		maxNodes: maxNodes,
+		clients:  make([]header.PubsubClient, maxNodes),
 	}
-	key := topics[0]
-	mes := p.createPublishMesasge(topics, userids, neguserids, payload)
-	p.es.Publish(header.E_PubsubRequested.String(), mes, -1, key)
 }
 
-func (p *Pubsub) createPublishMesasge(topics, userids, neguserids []string, payload []byte) *pb.PublishMessage {
+func (me *Pubsub) PublishAsync(topics, userids, neguserids []string, payload []byte) {
+	go func() {
+		if err := me.Publish(topics, userids, neguserids, payload); err != nil {
+			fmt.Println("Publish message error", err.Error())
+		}
+	}()
+}
+
+func (me *Pubsub) Publish(topics, userids, neguserids []string, payload []byte) error {
+	if len(topics) == 0 {
+		return nil
+	}
+
+	mes := me.createPublishMesasge(topics, userids, neguserids, payload)
+	ctx := context.Background()
+	for _, topic := range topics {
+		client, err := me.getPubsubClient(topic)
+		if err != nil {
+			return err
+		}
+
+		mes.Topics = []string{topic}
+		if _, err := client.Publish(ctx, mes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (me *Pubsub) createPublishMesasge(topics, userids, neguserids []string, payload []byte) *pb.PublishMessage {
 	mes := &pb.PublishMessage{}
 	mes.Payload = payload
 	mes.Topics = topics
@@ -58,29 +86,59 @@ func (p *Pubsub) createPublishMesasge(topics, userids, neguserids []string, payl
 		filter.WriteTo(&neguserswriter)
 		mes.NegUserIdsFilter = neguserswriter.Bytes()
 	}
-	mes.Ctx = &cpb.Context{SubTopic: header.E_PubsubPublish.String()}
 	return mes
 }
 
-func (p *Pubsub) Subscribe(sub *pb.Subscription) error {
+func (me *Pubsub) Subscribe(sub *pb.Subscription) error {
 	ctx := context.Background()
-	_, err := p.client.Subscribe(ctx, sub)
-	return err
+	for _, topic := range sub.GetTopics() {
+		client, err := me.getPubsubClient(topic)
+		if err != nil {
+			return err
+		}
+		if _, err := client.Subscribe(ctx, sub); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (p *Pubsub) Unsubscribe(sub *pb.Subscription) error {
+func (me *Pubsub) Unsubscribe(sub *pb.Subscription) error {
 	ctx := context.Background()
-	_, err := p.client.Subscribe(ctx, sub)
-	return err
+	for _, topic := range sub.GetTopics() {
+		client, err := me.getPubsubClient(topic)
+		if err != nil {
+			return err
+		}
+		if _, err := client.Subscribe(ctx, sub); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func dialPubsubService(service string) (header.PubsubClient, error) {
-	conn, err := dialGrpc(service)
+func (me *Pubsub) getPubsubClient(key string) (header.PubsubClient, error) {
+	no := int(crc32.ChecksumIEEE([]byte(key))) % me.maxNodes
+
+	me.Lock()
+	defer me.Unlock()
+
+	if len(me.clients) > 0 && me.clients[no] != nil {
+		return me.clients[no], nil
+	}
+
+	parts := strings.SplitN(me.service, ":", 2)
+	name, port := parts[0], parts[1]
+
+	// address: [pod name] + "." + [service name] + ":" + [pod port]
+	conn, err := dialGrpc(name + "-" + strconv.Itoa(no) + "." + name + ":" + port)
 	if err != nil {
 		fmt.Println("unable to connect to pubsub service", err)
 		return nil, err
 	}
-	return header.NewPubsubClient(conn), nil
+	me.clients[no] = header.NewPubsubClient(conn)
+
+	return me.clients[no], nil
 }
 
 func dialGrpc(service string) (*grpc.ClientConn, error) {
@@ -92,12 +150,4 @@ func dialGrpc(service string) (*grpc.ClientConn, error) {
 	opts = append(opts, grpc.WithTimeout(10*time.Second))
 	opts = append(opts, grpc.WithBalancerName(roundrobin.Name))
 	return grpc.Dial(service, opts...)
-}
-
-func NewPubsubClient(brokers []string, service string) *Pubsub {
-	c, err := dialPubsubService(service)
-	if err != nil {
-		panic(err)
-	}
-	return &Pubsub{client: c, es: kafka.NewPublisher(brokers)}
 }
