@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/subiz/header"
 	pb "github.com/subiz/header/pubsub"
 	"github.com/willf/bloom"
@@ -91,12 +92,14 @@ func (me *Pubsub) createPublishMesasge(topics, userids, neguserids []string, pay
 
 func (me *Pubsub) Subscribe(sub *pb.Subscription) error {
 	ctx := context.Background()
+	s := proto.Clone(sub).(*pb.Subscription)
 	for _, topic := range sub.GetTopics() {
 		client, err := me.getPubsubClient(topic)
 		if err != nil {
 			return err
 		}
-		if _, err := client.Subscribe(ctx, sub); err != nil {
+		s.Topics = []string{topic}
+		if _, err := client.Subscribe(ctx, s); err != nil {
 			return err
 		}
 	}
@@ -105,12 +108,14 @@ func (me *Pubsub) Subscribe(sub *pb.Subscription) error {
 
 func (me *Pubsub) Unsubscribe(sub *pb.Subscription) error {
 	ctx := context.Background()
+	s := proto.Clone(sub).(*pb.Subscription)
 	for _, topic := range sub.GetTopics() {
 		client, err := me.getPubsubClient(topic)
 		if err != nil {
 			return err
 		}
-		if _, err := client.Subscribe(ctx, sub); err != nil {
+		s.Topics = []string{topic}
+		if _, err := client.Subscribe(ctx, s); err != nil {
 			return err
 		}
 	}
