@@ -3,6 +3,7 @@ module github.com/subiz/pubsub-client
 go 1.13
 
 require (
+	github.com/golang/protobuf v1.3.2
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/subiz/header v0.0.118
 	github.com/willf/bitset v1.1.10 // indirect
