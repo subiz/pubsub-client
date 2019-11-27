@@ -119,6 +119,7 @@ func (me *Pubsub) Subscribe(sub *pb.Subscription) error {
 			}
 		}(topic)
 	}
+	wg.Wait()
 	return gerr
 }
 
@@ -143,6 +144,7 @@ func (me *Pubsub) Unsubscribe(sub *pb.Subscription) error {
 			}
 		}(topic)
 	}
+	wg.Wait()
 	return gerr
 }
 
