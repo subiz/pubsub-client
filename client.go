@@ -47,20 +47,28 @@ func (me *Pubsub) Publish(topics, userids, neguserids []string, payload []byte) 
 		return nil
 	}
 
-	mes := me.createPublishMesasge(topics, userids, neguserids, payload)
 	ctx := context.Background()
+	wg := &sync.WaitGroup{}
+	wg.Add(len(topics))
+	var gerr error
 	for _, topic := range topics {
-		client, err := me.getPubsubClient(topic)
-		if err != nil {
-			return err
-		}
+		go func(topic string) {
+			defer wg.Done()
+			client, err := me.getPubsubClient(topic)
+			if err != nil {
+				gerr = err
+				return
+			}
 
-		mes.Topics = []string{topic}
-		if _, err := client.Publish(ctx, mes); err != nil {
-			return err
-		}
+			mes := me.createPublishMesasge([]string{topic}, userids, neguserids, payload)
+			if _, err := client.Publish(ctx, mes); err != nil {
+				gerr = err
+				return
+			}
+		}(topic)
 	}
-	return nil
+	wg.Wait()
+	return gerr
 }
 
 func (me *Pubsub) createPublishMesasge(topics, userids, neguserids []string, payload []byte) *pb.PublishMessage {
@@ -92,34 +100,50 @@ func (me *Pubsub) createPublishMesasge(topics, userids, neguserids []string, pay
 
 func (me *Pubsub) Subscribe(sub *pb.Subscription) error {
 	ctx := context.Background()
-	s := proto.Clone(sub).(*pb.Subscription)
+	wg := &sync.WaitGroup{}
+	wg.Add(len(sub.GetTopics()))
+	var gerr error
 	for _, topic := range sub.GetTopics() {
-		client, err := me.getPubsubClient(topic)
-		if err != nil {
-			return err
-		}
-		s.Topics = []string{topic}
-		if _, err := client.Subscribe(ctx, s); err != nil {
-			return err
-		}
+		go func(topic string) {
+			defer wg.Done()
+			client, err := me.getPubsubClient(topic)
+			if err != nil {
+				gerr = err
+				return
+			}
+			s := proto.Clone(sub).(*pb.Subscription)
+			s.Topics = []string{topic}
+			if _, err := client.Subscribe(ctx, s); err != nil {
+				gerr = err
+				return
+			}
+		}(topic)
 	}
-	return nil
+	return gerr
 }
 
 func (me *Pubsub) Unsubscribe(sub *pb.Subscription) error {
 	ctx := context.Background()
-	s := proto.Clone(sub).(*pb.Subscription)
+	wg := &sync.WaitGroup{}
+	wg.Add(len(sub.GetTopics()))
+	var gerr error
 	for _, topic := range sub.GetTopics() {
-		client, err := me.getPubsubClient(topic)
-		if err != nil {
-			return err
-		}
-		s.Topics = []string{topic}
-		if _, err := client.Subscribe(ctx, s); err != nil {
-			return err
-		}
+		go func(topic string) {
+			defer wg.Done()
+			client, err := me.getPubsubClient(topic)
+			if err != nil {
+				gerr = err
+				return
+			}
+			s := proto.Clone(sub).(*pb.Subscription)
+			s.Topics = []string{topic}
+			if _, err := client.Subscribe(ctx, s); err != nil {
+				gerr = err
+				return
+			}
+		}(topic)
 	}
-	return nil
+	return gerr
 }
 
 func (me *Pubsub) getPubsubClient(key string) (header.PubsubClient, error) {
