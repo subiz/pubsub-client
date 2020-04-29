@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"hash/crc32"
@@ -13,7 +12,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/subiz/header"
 	pb "github.com/subiz/header/pubsub"
-	"github.com/willf/bloom"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer/roundrobin"
 )
@@ -76,25 +74,6 @@ func (me *Pubsub) createPublishMesasge(topics, userids, neguserids []string, pay
 	mes.Payload = payload
 	mes.Topics = topics
 
-	if len(userids) > 0 {
-		filter := bloom.New(300, 5)
-		for _, userid := range userids {
-			filter.Add([]byte(userid))
-		}
-		var userswriter bytes.Buffer
-		filter.WriteTo(&userswriter)
-		mes.UserIdsFilter = userswriter.Bytes()
-	}
-
-	if len(neguserids) > 0 {
-		filter := bloom.New(300, 5)
-		for _, userid := range neguserids {
-			filter.Add([]byte(userid))
-		}
-		var neguserswriter bytes.Buffer
-		filter.WriteTo(&neguserswriter)
-		mes.NegUserIdsFilter = neguserswriter.Bytes()
-	}
 	return mes
 }
 
